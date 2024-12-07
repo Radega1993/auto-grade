@@ -1,6 +1,10 @@
+import logging
 import os
 import uuid
 from werkzeug.utils import secure_filename
+import json
+import PyPDF2
+import time
 
 class FileHandler:
     """
@@ -32,18 +36,67 @@ class FileHandler:
         return file_path
 
     @staticmethod
-    def clean_temporary_files(file_paths, max_age_hours=24):
+    def read_json(file_path):
         """
-        Remove temporary files older than specified hours
+        Read a JSON file and return its content as a dictionary
         
-        :param file_paths: List of file paths to potentially delete
-        :param max_age_hours: Maximum age of files before deletion
+        :param file_path: Path to the JSON file
+        :return: Dictionary with the content of the JSON file
         """
-        current_time = os.path.getctime()
+        try:
+            with open(file_path, 'r') as file:
+                return json.load(file)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"The file at {file_path} does not exist.")
+        except json.JSONDecodeError:
+            raise ValueError(f"Invalid JSON in the file {file_path}.")
+
+    @staticmethod
+    def read_text(file_path):
+        """
+        Read a text file and return its contents as a string
+        
+        :param file_path: Path to the text file
+        :return: String with the content of the text file
+        """
+        try:
+            with open(file_path, 'r') as file:
+                return file.read()
+        except FileNotFoundError:
+            raise FileNotFoundError(f"The file at {file_path} does not exist.")
+        except IOError:
+            raise IOError(f"Unable to read the file {file_path}.")
+
+    @staticmethod
+    def read_pdf(file_path):
+        """
+        Read a PDF file and return its text content.
+        
+        :param file_path: Path to the PDF file
+        :return: String containing all text extracted from the PDF
+        """
+        try:
+            with open(file_path, 'rb') as file:  # 'rb' for reading in binary mode
+                pdf_reader = PyPDF2.PdfReader(file)
+                text = []
+                for page in pdf_reader.pages:
+                    text.append(page.extract_text())
+                return ' '.join(text)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"The file at {file_path} does not exist.")
+        except Exception as e:
+            raise IOError(f"Could not read the PDF file: {e}")
+        
+    @staticmethod
+    def clean_temporary_files(file_paths):
+        """
+        Remove specified temporary files
+        
+        :param file_paths: List of file paths to delete
+        """
         for file_path in file_paths:
-            file_age = (current_time - os.path.getctime(file_path)) / 3600
-            if file_age > max_age_hours:
-                try:
-                    os.remove(file_path)
-                except Exception as e:
-                    print(f"Error deleting file {file_path}: {e}")
+            try:
+                os.remove(file_path)
+                logging.info(f"Archivo eliminado: {file_path}")
+            except Exception as e:
+                logging.error(f"Error eliminando archivo {file_path}: {e}")

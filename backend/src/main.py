@@ -5,6 +5,14 @@ from flask_cors import CORS
 
 from src.config.settings import config
 from src.routes.assignment_routes import assignment_bp
+from concurrent.futures import ProcessPoolExecutor
+import os
+import sys
+
+# Configuración del path para que src sea reconocible
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+
+executor = ProcessPoolExecutor(max_workers=os.cpu_count())
 
 def create_app():
     """Factory de aplicación Flask"""
