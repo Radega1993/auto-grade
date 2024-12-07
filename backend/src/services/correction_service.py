@@ -31,6 +31,48 @@ class CorrectionService:
         return text[:1000] + "..." if len(text) > 1000 else text
     
     @staticmethod
+    def _normalize_response(response_content: str) -> CorrectionResult:
+        """
+        Normaliza la respuesta de Ollama para asegurar el formato consistente.
+
+        :param response_content: Respuesta como string.
+        :return: CorrectionResult estandarizado.
+        """
+        try:
+            # Intentar procesar como JSON válido
+            response_json = json.loads(response_content)
+            return CorrectionResult(
+                grade=response_json.get("grade", 0.0),
+                comments=response_json.get("comments", "Sin comentarios."),
+                strengths=response_json.get("strengths", []),
+                areas_of_improvement=response_json.get("areas_of_improvement", []),
+            )
+        except json.JSONDecodeError:
+            logging.warning("Respuesta no es un JSON válido. Intentando analizar contenido como texto.")
+
+        # Si JSON falla, intentar extraer contenido estructurado con regex
+        try:
+            grade_match = re.search(r'"?grade"?\s*:\s*(\d+(\.\d+)?)', response_content)
+            comments_match = re.search(r'"?comments"?\s*:\s*"(.*?)"', response_content, re.DOTALL)
+            strengths_match = re.search(r'"?strengths"?\s*:\s*\[(.*?)\]', response_content, re.DOTALL)
+            improvements_match = re.search(r'"?areas_of_improvement"?\s*:\s*\[(.*?)\]', response_content, re.DOTALL)
+
+            grade = float(grade_match.group(1)) if grade_match else 0.0
+            comments = comments_match.group(1).strip() if comments_match else "Sin comentarios."
+            strengths = json.loads(f"[{strengths_match.group(1)}]") if strengths_match else []
+            areas_of_improvement = json.loads(f"[{improvements_match.group(1)}]") if improvements_match else []
+
+            return CorrectionResult(
+                grade=grade,
+                comments=comments,
+                strengths=strengths,
+                areas_of_improvement=areas_of_improvement,
+            )
+        except Exception as e:
+            logging.error(f"Error al analizar respuesta como texto estructurado: {e}")
+            return CorrectionResult.default_error_result("Error en la evaluación automática")
+
+    @staticmethod
     def _extract_json_content(response_content: str) -> str:
         """
         Extraer el contenido JSON válido de la respuesta.
@@ -66,10 +108,10 @@ class CorrectionService:
             Tarea del estudiante: {assignment}
 
             Instrucciones para la evaluación:
-            1. Califica la tarea de 0 a 10
-            2. Proporciona comentarios detallados
-            3. Justifica cada punto de la calificación
-            4. Sé específico y constructivo
+            1. Califica la tarea de 0 a 10.
+            2. Proporciona comentarios detallados.
+            3. Identifica puntos fuertes y áreas de mejora específicos.
+            4. Asegúrate de devolver la respuesta estrictamente en el formato JSON proporcionado.
 
             Idioma de la respuesta: {language}
 
@@ -81,15 +123,16 @@ class CorrectionService:
                 "areas_of_improvement": ["Área de mejora 1", ...]
             }}
             """
+        
         return f"""
         Evalúa la siguiente tarea:
         Tarea del estudiante: {assignment}
 
         Instrucciones para la evaluación:
-        1. Califica la tarea de 0 a 10
-        2. Proporciona comentarios detallados
-        3. Justifica cada punto de la calificación
-        4. Sé específico y constructivo
+        1. Califica la tarea de 0 a 10.
+        2. Proporciona comentarios detallados.
+        3. Identifica puntos fuertes y áreas de mejora específicos.
+        4. Asegúrate de devolver la respuesta estrictamente en el formato JSON proporcionado.
 
         Idioma de la respuesta: {language}
 
@@ -137,7 +180,6 @@ class CorrectionService:
             # Preprocesar texto y construir prompt
             assignment_content = cls.preprocess_text(assignment_content)
             prompt = cls._build_prompt(key_criteria, assignment_content, language)
-            logging.debug(f"Prompt enviado a Ollama: {prompt}")
 
             # Llamar al modelo
             response = ollama.chat(
@@ -149,27 +191,11 @@ class CorrectionService:
             response_content = response.get('message', {}).get('content', '').strip()
             logging.debug(f"Respuesta de Ollama: {response_content}")
 
-            # Intentar procesar como JSON válido
-            # Intentar extraer y cargar JSON
-            try:
-                json_content = cls._extract_json_content(response_content)
-                response_json = json.loads(json_content)
-                return CorrectionResult(
-                    grade=response_json.get("grade", 0.0),
-                    comments=response_json.get("comments", "Sin comentarios."),
-                    strengths=response_json.get("strengths", []),
-                    areas_of_improvement=response_json.get("areas_of_improvement", []),
-                )
-            except (ValueError, json.JSONDecodeError) as json_err:
-                logging.warning(f"Fallo al procesar JSON: {json_err}. Usando fallback con regex.")
-                return cls._parse_with_regex(response_content)
+            return cls._normalize_response(response_content)
 
         except Exception as e:
             logging.error(f"Error en corrección: {e}", exc_info=True)
-            return CorrectionResult(
-                grade=0.0,
-                comments="Error en la evaluación automática",
-            )
+            return CorrectionResult.default_error_result("Error en la evaluación automática")
         
     @staticmethod
     def _parse_with_regex(response_content: str) -> CorrectionResult:

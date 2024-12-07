@@ -24,7 +24,7 @@ def correct_assignments():
     student_paths = []
     try:
         # Validar idioma y archivos de entrada
-        language = request.form.get("language", "español")
+        language = request.form.get("language", "español").strip().lower()
         student_files = request.files.getlist('student_files')
         if not student_files:
             return jsonify({"error": "Se requieren archivos de tareas para corregir"}), 400
