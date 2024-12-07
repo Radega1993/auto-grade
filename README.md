@@ -15,7 +15,7 @@ AutoGrader es una plataforma innovadora que utiliza inteligencia artificial para
 
 - **Frontend**: React + TypeScript
 - **Backend**: Python (Flask)
-- **IA**: Ollama (Llama2)
+- **IA**: Ollama (Llama3.2)
 - **Infraestructura**: Docker, Terraform
 - **CI/CD**: GitHub Actions
 
@@ -44,13 +44,36 @@ docker-compose up --build
 
 ### Configuración de Desarrollo Local
 
+### Preparar el entorno (Linux-Debian)
+```bash
+# Actualizar repositorios
+sudo apt update
+
+# Instalar dependencias del sistema
+sudo apt install -y python3-pip python3-venv python3-dev build-essential
+
+# Instalar Docker (si no lo tienes)
+sudo apt install -y docker.io docker-compose
+
+# Instalar Ollama
+curl https://ollama.ai/install.sh | sh
+
+# Descargar modelo Llama2
+ollama pull llama3.2
+```
+
 #### Backend
 ```bash
+# Crear entorno virtual
 cd backend
-python -m venv venv
+python3 -m venv venv
 source venv/bin/activate
+
+# Instalar dependencias
 pip install -r requirements.txt
-flask run
+
+# Ejecutar la aplicación
+python -m src.main
 ```
 
 #### Frontend
