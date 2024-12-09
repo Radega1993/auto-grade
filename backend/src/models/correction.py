@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass, asdict
 from typing import List, Optional
 
@@ -49,3 +50,19 @@ class CorrectionResult:
             grade=0.0,
             comments=error_message
         )
+
+    @staticmethod
+    def from_response(response: dict) -> "CorrectionResult":
+        """
+        Crea una instancia de CorrectionResult a partir de una respuesta JSON.
+        """
+        try:
+            return CorrectionResult(
+                grade=response.get("grade", 0.0),
+                comments=response.get("comments", "Sin comentarios."),
+                strengths=response.get("strengths", []),
+                areas_of_improvement=response.get("areas_of_improvement", []),
+            )
+        except Exception as e:
+            logging.error(f"Error al convertir la respuesta en CorrectionResult: {e}")
+            return CorrectionResult.default_error_result()

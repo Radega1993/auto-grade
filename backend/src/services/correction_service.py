@@ -102,20 +102,23 @@ class CorrectionService:
         """
         if criteria:
             return f"""
-            Evalúa la siguiente tarea basándote en estos criterios:
+            Se te proporciona una tarea académica ya completada por un estudiante. Tu objetivo es evaluarla 
+            técnicamente basándote en los siguientes criterios. No necesitas crear respuestas ni completar 
+            ejercicios, solo evaluar el contenido que se te da.
+
             Criterios: {json.dumps(criteria)}
 
             Tarea del estudiante: {assignment}
 
             Instrucciones para la evaluación:
-            1. Califica la tarea de 0 a 10.
-            2. Proporciona comentarios detallados.
+            1. Califica la tarea de 0 a 10 basándote exclusivamente en la calidad técnica de las respuestas proporcionadas y se critico.
+            2. Proporciona comentarios detallados justificando la calificación asignada.
             3. Identifica puntos fuertes y áreas de mejora específicos.
-            4. Asegúrate de devolver la respuesta estrictamente en el formato JSON proporcionado.
+            4. Responde estrictamente en el formato JSON proporcionado.
 
             Idioma de la respuesta: {language}
 
-            Formato de respuesta (JSON estricto):
+            Formato de respuesta, responde estrictamente en formato JSON según el siguiente ejemplo:
             {{
                 "grade": float (0-10),
                 "comments": "Comentarios detallados",
@@ -123,20 +126,21 @@ class CorrectionService:
                 "areas_of_improvement": ["Área de mejora 1", ...]
             }}
             """
-        
         return f"""
-        Evalúa la siguiente tarea:
+        Se te proporciona una tarea académica ya completada por un estudiante. Tu objetivo es evaluarla 
+        técnicamente. No necesitas crear respuestas ni completar ejercicios, solo evaluar el contenido que se te da.
+
         Tarea del estudiante: {assignment}
 
         Instrucciones para la evaluación:
-        1. Califica la tarea de 0 a 10.
-        2. Proporciona comentarios detallados.
+        1. Califica la tarea de 0 a 10 basándote exclusivamente en la calidad técnica de las respuestas proporcionadas.
+        2. Proporciona comentarios detallados justificando la calificación asignada.
         3. Identifica puntos fuertes y áreas de mejora específicos.
-        4. Asegúrate de devolver la respuesta estrictamente en el formato JSON proporcionado.
+        4. Responde estrictamente en el formato JSON proporcionado.
 
         Idioma de la respuesta: {language}
 
-        Formato de respuesta (JSON estricto):
+        Formato de respuesta, responde estrictamente en formato JSON según el siguiente ejemplo:
         {{
             "grade": float (0-10),
             "comments": "Comentarios detallados",
@@ -158,28 +162,32 @@ class CorrectionService:
         """
         return CorrectionService.correct_assignment(criteria_hash, assignment_hash, language)
 
-    @classmethod
+    @staticmethod
     def correct_assignment(
-        cls, 
-        key_criteria: Optional[Dict], 
+        key_criteria: Optional[Dict],
         assignment_content: str,
         language: str = "español"
     ) -> CorrectionResult:
         """
-        Corrige una tarea utilizando Ollama
-        
+        Corrige una tarea utilizando el modelo configurado.
+
         Args:
-            key_criteria (Dict): Criterios de evaluación
-            assignment_content (str): Contenido de la tarea
-            language (str): Idioma de la respuesta
-        
+            key_criteria (Dict): Criterios de evaluación.
+            assignment_content (str): Contenido de la tarea.
+            language (str): Idioma de la respuesta.
+
         Returns:
-            CorrectionResult: Resultado de la corrección
+            CorrectionResult: Resultado de la corrección.
+   
         """
+
+        if not assignment_content.strip():
+            logging.error("El contenido de la tarea está vacío o no válido.")
+            return CorrectionResult.default_error_result("El contenido de la tarea está vacío o no válido.")
+
         try:
-            # Preprocesar texto y construir prompt
-            assignment_content = cls.preprocess_text(assignment_content)
-            prompt = cls._build_prompt(key_criteria, assignment_content, language)
+            # Construir el prompt
+            prompt = CorrectionService._build_prompt(key_criteria, assignment_content, language)
 
             # Llamar al modelo
             response = ollama.chat(
@@ -187,15 +195,28 @@ class CorrectionService:
                 messages=[{'role': 'user', 'content': prompt}]
             )
 
-            # Procesar la respuesta del modelo
-            response_content = response.get('message', {}).get('content', '').strip()
-            logging.debug(f"Respuesta de Ollama: {response_content}")
+            # Verificar y analizar la respuesta
+            response_content = response.get('message', {}).get('content', None)
+            logging.debug(f"Respuesta cruda del modelo: {response_content}")
 
-            return cls._normalize_response(response_content)
+            if not response_content:
+                logging.error("El modelo devolvió una respuesta vacía.")
+                return CorrectionResult.default_error_result("El modelo devolvió una respuesta vacía.")
+
+            try:
+                response_json = json.loads(response_content)
+                return CorrectionResult(
+                    grade=response_json.get("grade", 0.0),
+                    comments=response_json.get("comments", "Sin comentarios."),
+                    strengths=response_json.get("strengths", []),
+                    areas_of_improvement=response_json.get("areas_of_improvement", [])
+                )
+            except json.JSONDecodeError:
+                return CorrectionService._parse_with_regex(response_content)
 
         except Exception as e:
-            logging.error(f"Error en corrección: {e}", exc_info=True)
-            return CorrectionResult.default_error_result("Error en la evaluación automática")
+            logging.error(f"Error en la corrección: {e}")
+            return CorrectionResult.default_error_result("Error en la evaluación automática.")
         
     @staticmethod
     def _parse_with_regex(response_content: str) -> CorrectionResult:
@@ -232,25 +253,27 @@ class CorrectionService:
             )
 
     @classmethod
-    def batch_correction(
-        cls, 
-        key_criteria: Optional[Dict], 
-        assignments: List[str],
-        language: str = "español"
-    ) -> List[CorrectionResult]:
+    def batch_correction(cls, key_criteria: Optional[Dict], assignments: List[str], language: str = "español") -> List[CorrectionResult]:
         """
-        Corrige múltiples tareas en lote
-        
+        Corrige múltiples tareas en paralelo.
+
         Args:
-            key_criteria (Optional[Dict]): Criterios de evaluación
-            assignments (List[str]): Lista de contenidos de tareas
-            language (str): Idioma de la respuesta
-        
+            key_criteria (Optional[Dict]): Criterios de evaluación.
+            assignments (List[str]): Lista de contenidos de tareas.
+            language (str): Idioma de la respuesta.
+
         Returns:
-            List[CorrectionResult]: Lista de resultados
+            List[CorrectionResult]: Lista de resultados.
         """
-        future_results = [
-            executor.submit(cls.correct_assignment, key_criteria, assignment, language) 
-            for assignment in assignments
-        ]
-        return [future.result() for future in future_results]
+        results = []
+        with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
+            futures = [executor.submit(cls.correct_assignment, key_criteria, task, language) for task in assignments]
+
+            for future in futures:
+                try:
+                    results.append(future.result())
+                except Exception as e:
+                    logging.error(f"Error procesando tarea: {e}")
+                    results.append(CorrectionResult.default_error_result("Error procesando la tarea."))
+
+        return results

@@ -34,6 +34,18 @@ class FileHandler:
         file_path = os.path.join(upload_folder, filename)
         file.save(file_path)
         return file_path
+    
+    @staticmethod
+    def read_file(file_path):
+        """
+        Lee el contenido del archivo, soportando PDF, texto y JSON.
+        """
+        if file_path.endswith(".pdf"):
+            return FileHandler.read_pdf(file_path)
+        elif file_path.endswith(".json"):
+            return FileHandler.read_json(file_path)
+        else:
+            return FileHandler.read_text(file_path)
 
     @staticmethod
     def read_json(file_path):

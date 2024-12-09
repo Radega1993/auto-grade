@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
-import os
 import logging
-import PyPDF2
+from concurrent.futures import ThreadPoolExecutor
+from difflib import SequenceMatcher
 
 from src.config.settings import config
 from src.services.correction_service import CorrectionService
@@ -13,8 +13,8 @@ assignment_bp = Blueprint('assignments', __name__)
 @assignment_bp.route('/correct', methods=['POST'])
 def correct_assignments():
     """
-    Endpoint para corrección de tareas
-    
+    Endpoint para corrección de tareas con paralelización y detección de similitudes.
+
     Esperado:
     - Opcional: key_file (Archivo JSON o PDF con criterios)
     - student_files: Archivos de tareas a corregir
@@ -34,50 +34,52 @@ def correct_assignments():
         key_criteria = None
         if key_file:
             key_path = FileHandler.save_uploaded_file(key_file, config.UPLOAD_FOLDER)
-            if key_file.filename.endswith('.pdf'):
-                key_criteria = FileHandler.read_pdf(key_path)
-            elif key_file.filename.endswith('.json'):
-                key_criteria = FileHandler.read_json(key_path)
-            else:
-                return jsonify({"error": "Tipo de archivo de clave no soportado"}), 400
+            key_criteria = FileHandler.read_file(key_path)
 
-        # Leer archivos de tareas
+        # Leer y procesar archivos de tareas
         student_paths = [FileHandler.save_uploaded_file(file, config.UPLOAD_FOLDER) for file in student_files]
-        assignments_content = [
-            FileHandler.read_pdf(path) if path.endswith('.pdf') else FileHandler.read_text(path)
-            for path in student_paths
-        ]
+        assignments = [FileHandler.read_file(path) for path in student_paths]
 
-        # Corrección
-        results = CorrectionService.batch_correction(
-            key_criteria,
-            assignments_content,
-            language=language
-        )
+        # Corrección en paralelo
+        with ThreadPoolExecutor() as executor:
+            correction_futures = [
+                executor.submit(CorrectionService.correct_assignment, key_criteria, assignment, language)
+                for assignment in assignments
+            ]
 
-        return jsonify({"results": [result.to_dict() for result in results]})
+        corrections = [future.result() for future in correction_futures]
+
+        # Detección de similitudes entre archivos
+        similarity_results = []
+        for i in range(len(assignments)):
+            for j in range(i + 1, len(assignments)):
+                similarity = SequenceMatcher(None, assignments[i], assignments[j]).ratio()
+                similarity_results.append({
+                    "file1": student_files[i].filename,
+                    "file2": student_files[j].filename,
+                    "similarity_percentage": round(similarity * 100, 2)
+                })
+
+        # Construir respuesta
+        response = {
+            "corrections": [
+                {
+                    "student_file": student_files[i].filename,
+                    "result": corrections[i].to_dict()
+                }
+                for i in range(len(corrections))
+            ],
+            "similarities": similarity_results
+        }
+
+        return jsonify(response)
 
     except Exception as e:
         logging.error(f"Error en el proceso de corrección: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
     finally:
+        # Limpiar archivos temporales
         if key_path:
             FileHandler.clean_temporary_files([key_path])
         FileHandler.clean_temporary_files(student_paths)
-
-# Método para leer PDF
-def read_pdf(file_path):
-    """
-    Read a PDF file and return its text content.
-    """
-    try:
-        with open(file_path, 'rb') as file:  # 'rb' for reading in binary mode
-            pdf_reader = PyPDF2.PdfReader(file)
-            text = []
-            for page in pdf_reader.pages:
-                text.append(page.extract_text() if page.extract_text() else "")
-            return ' '.join(text).strip()
-    except Exception as e:
-        logging.error(f"Error reading PDF file at {file_path}: {e}", exc_info=True)
-        raise
