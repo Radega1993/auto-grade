@@ -1,11 +1,14 @@
 import logging
 import os
 import json
+import re
 from typing import Dict, Any, List, Optional
 from concurrent.futures import ProcessPoolExecutor
 
 from src.models.correction import CorrectionResult
+from src.services.file_processor import FileProcessor
 from src.models.model_strategy import OllamaModelStrategy, OpenAIModelStrategy
+from src.utils.analysis import Analysis
 
 class CorrectionService:
     """Servicio principal para corrección de tareas"""
@@ -23,6 +26,20 @@ class CorrectionService:
         else:
             logging.error(f"Modelo desconocido: {model_type}. Usando Ollama por defecto.")
             self.strategy = OllamaModelStrategy()
+
+    def validate_exercises(self, required_exercises: List[str], content: str) -> List[str]:
+        """
+        Valida si los ejercicios requeridos están presentes en el contenido.
+        
+        Args:
+            required_exercises (List[str]): Lista de ejercicios requeridos.
+            content (str): Contenido de la tarea.
+            
+        Returns:
+            List[str]: Ejercicios faltantes.
+        """
+        missing_exercises = [exercise for exercise in required_exercises if exercise.lower() not in content.lower()]
+        return missing_exercises
 
     @staticmethod
     def build_prompt(criteria: Optional[Dict], assignment: str, language: str) -> str:
@@ -121,8 +138,30 @@ class CorrectionService:
             Dict[str, Any]: Resultado de la corrección incluyendo porcentaje de IA.
         """
         correction_result = self.correct_assignment(key_criteria, assignment_content, language)
-        ai_percentage = self.detect_ai_content(assignment_content)
+        ai_percentage = Analysis.detect_ai_content(assignment_content, self.strategy)
         correction_dict = correction_result.to_dict()
+        correction_dict["ai_generated_percentage"] = round(ai_percentage, 2)
+        return correction_dict
+
+    def correct_assignment_with_validation(self, key_criteria: Optional[Dict], assignment_content: str, required_exercises: List[str], language: str = "español") -> Dict[str, Any]:
+        """
+        Corrige una tarea validando ejercicios, analizando IA, y detectando ejercicios faltantes.
+
+        Args:
+            key_criteria (Dict): Criterios de evaluación.
+            assignment_content (str): Contenido de la tarea.
+            required_exercises (List[str]): Ejercicios requeridos.
+            language (str): Idioma de la respuesta.
+
+        Returns:
+            Dict[str, Any]: Resultado de la corrección con ejercicios faltantes.
+        """
+        missing_exercises = self.validate_exercises(required_exercises, assignment_content)
+        correction_result = self.correct_assignment(key_criteria, assignment_content, language)
+        ai_percentage = self.detect_ai_content(assignment_content)
+        
+        correction_dict = correction_result.to_dict()
+        correction_dict["missing_exercises"] = missing_exercises
         correction_dict["ai_generated_percentage"] = round(ai_percentage, 2)
         return correction_dict
 
