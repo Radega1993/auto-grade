@@ -10,6 +10,7 @@ backend/
 │   │
 │   ├── models/
 │   │   ├── __init__.py
+│   │   ├── model_strategy.py
 │   │   └── correction.py     # Modelo de corrección
 │   │
 │   ├── services/
