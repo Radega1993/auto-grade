@@ -15,7 +15,7 @@ AutoGrader es una plataforma innovadora que utiliza inteligencia artificial para
 
 - **Frontend**: React + TypeScript
 - **Backend**: Python (Flask)
-- **IA**: Ollama (Llama3.2)
+- **IA**: Ollama (Llama3.2), ChatGPT4
 - **Infraestructura**: Docker, Terraform
 - **CI/CD**: GitHub Actions
 
