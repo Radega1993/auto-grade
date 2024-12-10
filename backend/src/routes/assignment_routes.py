@@ -25,6 +25,7 @@ def correct_assignments():
     try:
         # Validar idioma y archivos de entrada
         language = request.form.get("language", "español").strip().lower()
+        model_type = request.form.get("model_type", "ollama").strip().lower()
         student_files = request.files.getlist('student_files')
         if not student_files:
             return jsonify({"error": "Se requieren archivos de tareas para corregir"}), 400
@@ -40,10 +41,13 @@ def correct_assignments():
         student_paths = [FileHandler.save_uploaded_file(file, config.UPLOAD_FOLDER) for file in student_files]
         assignments = [FileHandler.read_file(path) for path in student_paths]
 
+        # Crear instancia de CorrectionService
+        correction_service = CorrectionService(model_type)
+
         # Corrección en paralelo
         with ThreadPoolExecutor() as executor:
             correction_futures = [
-                executor.submit(CorrectionService.correct_assignment, key_criteria, assignment, language)
+                executor.submit(correction_service.correct_assignment, key_criteria, assignment, language)
                 for assignment in assignments
             ]
 

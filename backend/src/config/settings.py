@@ -12,9 +12,13 @@ class Config:
     DEBUG: bool = field(default_factory=lambda: os.getenv('FLASK_DEBUG', 'True') == 'True')
     
     # Configuraciones de Ollama
-    OLLAMA_MODEL: str = field(default_factory=lambda: os.getenv('OLLAMA_MODEL', 'llama2'))
+    OLLAMA_MODEL: str = field(default_factory=lambda: os.getenv('OLLAMA_MODEL', 'llama3.2'))
     OLLAMA_HOST: str = field(default_factory=lambda: os.getenv('OLLAMA_HOST', 'localhost'))
     OLLAMA_PORT: int = field(default_factory=lambda: int(os.getenv('OLLAMA_PORT', '11434')))
+    
+     # Configuraciones de OpenAI
+    OPENAI_API_KEY: str = field(default_factory=lambda: os.getenv('OPENAI_API_KEY', ''))
+    OPENAI_MODEL: str = field(default_factory=lambda: os.getenv('OPENAI_MODEL', 'gpt-4'))
     
     # Directorios
     UPLOAD_FOLDER: str = field(default_factory=lambda: os.path.join(os.getcwd(), 'uploads'))

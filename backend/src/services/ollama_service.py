@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional
 
 class OllamaService:
     def __init__(self, 
-                 model: str = 'llama2', 
+                 model: str = 'llama3.2', 
                  logger: Optional[logging.Logger] = None):
         """
         Inicializar servicio de Ollama
