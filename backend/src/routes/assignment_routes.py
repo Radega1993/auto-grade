@@ -25,7 +25,7 @@ def correct_assignments():
     try:
         # Validar idioma y archivos de entrada
         language = request.form.get("language", "español").strip().lower()
-        model_type = request.form.get("model_type", "ollama").strip().lower()
+        model_type = request.form.get("model_type", "gpt-3.5-turbo").strip().lower()
         student_files = request.files.getlist('student_files')
         if not student_files:
             return jsonify({"error": "Se requieren archivos de tareas para corregir"}), 400
@@ -41,17 +41,21 @@ def correct_assignments():
         student_paths = [FileHandler.save_uploaded_file(file, config.UPLOAD_FOLDER) for file in student_files]
         assignments = [FileHandler.read_file(path) for path in student_paths]
 
-        # Crear instancia de CorrectionService
-        correction_service = CorrectionService(model_type)
+        # Caching de resultados para tareas idénticas
+        results_cache = {}
+        corrections = []
 
-        # Corrección en paralelo
-        with ThreadPoolExecutor() as executor:
-            correction_futures = [
-                executor.submit(correction_service.correct_assignment, key_criteria, assignment, language)
-                for assignment in assignments
-            ]
-
-        corrections = [future.result() for future in correction_futures]
+        # Corrección con reducción de costos
+        for idx, assignment in enumerate(assignments):
+            if assignment in results_cache:
+                logging.info(f"Tarea {student_files[idx].filename} recuperada del cache.")
+                corrections.append(results_cache[assignment])
+            else:
+                correction_result = CorrectionService(model_type).correct_assignment_with_ai_detection(
+                    key_criteria, assignment, language
+                )
+                corrections.append(correction_result)
+                results_cache[assignment] = correction_result
 
         # Detección de similitudes entre archivos
         similarity_results = []
@@ -69,7 +73,7 @@ def correct_assignments():
             "corrections": [
                 {
                     "student_file": student_files[i].filename,
-                    "result": corrections[i].to_dict()
+                    "result": corrections[i]
                 }
                 for i in range(len(corrections))
             ],

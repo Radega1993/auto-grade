@@ -82,6 +82,49 @@ class CorrectionService:
             "areas_of_improvement": ["Área de mejora 1", ...]
         }}
         """
+    
+    def detect_ai_content(self, assignment_content: str) -> float:
+        """
+        Detecta el porcentaje de contenido generado con inteligencia artificial.
+
+        Args:
+            assignment_content (str): Contenido de la tarea.
+
+        Returns:
+            float: Porcentaje estimado de contenido generado con IA.
+        """
+        prompt = f"""
+        Analiza el siguiente texto y estima qué porcentaje parece haber sido generado con inteligencia artificial. Responde estrictamente en el siguiente formato JSON:
+        {{
+            "ai_generated_percentage": float (0-100)
+        }}
+
+        Texto: {assignment_content}
+        """
+        try:
+            response = self.strategy.evaluate(prompt)
+            return response.get("ai_generated_percentage", 0.0)
+        except Exception as e:
+            logging.error(f"Error detectando contenido generado con IA: {e}")
+            return 0.0
+    
+    def correct_assignment_with_ai_detection(self, key_criteria: Optional[Dict], assignment_content: str, language: str = "español") -> Dict[str, Any]:
+        """
+        Corrige una tarea y detecta contenido generado con IA.
+
+        Args:
+            key_criteria (Dict): Criterios de evaluación.
+            assignment_content (str): Contenido de la tarea.
+            language (str): Idioma de la respuesta.
+
+        Returns:
+            Dict[str, Any]: Resultado de la corrección incluyendo porcentaje de IA.
+        """
+        correction_result = self.correct_assignment(key_criteria, assignment_content, language)
+        ai_percentage = self.detect_ai_content(assignment_content)
+        correction_dict = correction_result.to_dict()
+        correction_dict["ai_generated_percentage"] = round(ai_percentage, 2)
+        return correction_dict
 
     def correct_assignment(self, key_criteria: Optional[Dict], assignment_content: str, language: str = "español") -> CorrectionResult:
         """
