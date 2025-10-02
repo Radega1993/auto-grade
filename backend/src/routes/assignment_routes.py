@@ -1,90 +1,296 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app, Response
+from flask_cors import cross_origin
+from werkzeug.utils import secure_filename
+import os
 import logging
-from concurrent.futures import ThreadPoolExecutor
 
-from src.config.settings import config
-from src.services.correction_service import CorrectionService
-from src.utils.file_handler import FileHandler
-from src.utils.analysis import Analysis
-from src.services.file_processor import FileProcessor  # Para procesar texto e imágenes
+from ..auth.decorators import jwt_required, require_roles
+from ..database.models import UserRole
+from ..services.assignment_service import AssignmentService
 
-logging.basicConfig(level=logging.DEBUG)
-assignment_bp = Blueprint('assignments', __name__)
+logger = logging.getLogger(__name__)
 
-@assignment_bp.route('/correct', methods=['POST'])
-def correct_assignments():
-    """
-    Endpoint para corrección de tareas con validación de ejercicios, análisis de imágenes y detección de similitudes.
+# Crear blueprint
+assignment_bp = Blueprint('assignments', __name__, url_prefix='/api/assignments')
 
-    Esperado:
-    - Opcional: key_file (Archivo JSON o PDF con criterios)
-    - student_files: Archivos de tareas a corregir
-    - Opcional: language (Idioma para las respuestas, por defecto "español")
-    - Opcional: required_exercises (Lista de ejercicios requeridos)
-    """
-    key_path = None
-    student_paths = []
+# Inicializar servicio (se configurará en main.py)
+assignment_service = None
+
+def init_assignment_service(upload_folder: str, openai_api_key: str):
+    """Inicializa el servicio de asignaciones"""
+    global assignment_service
+    assignment_service = AssignmentService()
+    logger.info("Servicio de asignaciones inicializado")
+
+def _check_service():
+    """Verifica que el servicio esté inicializado"""
+    if assignment_service is None:
+        raise RuntimeError("Servicio de asignaciones no inicializado")
+
+@assignment_bp.route('/upload', methods=['POST'])
+@cross_origin(supports_credentials=True)
+@jwt_required
+@require_roles([UserRole.TEACHER, UserRole.COORDINATOR, UserRole.ADMIN])
+def upload_assignment():
+    """Sube una nueva asignación"""
     try:
-        # Validar idioma y parámetros de entrada
-        language = request.form.get("language", "español").strip().lower()
-        model_type = request.form.get("model_type", "gpt-4").strip().lower()
-        required_exercises = request.form.getlist("required_exercises")
-        student_files = request.files.getlist('student_files')
-        if not student_files:
-            return jsonify({"error": "Se requieren archivos de tareas para corregir"}), 400
-
-        # Procesar archivo clave (opcional)
-        key_file = request.files.get('key_file')
-        key_criteria = None
-        if key_file:
-            key_path = FileHandler.save_uploaded_file(key_file, config.UPLOAD_FOLDER)
-            key_criteria = FileHandler.read_file(key_path)
-
-        # Procesar archivos de tareas
-        student_paths = [FileHandler.save_uploaded_file(file, config.UPLOAD_FOLDER) for file in student_files]
-        assignments = [FileProcessor.extract_text(path) for path in student_paths]
-
-        corrections = []
-
-        # Validación y corrección de cada tarea
-        for idx, assignment in enumerate(assignments):
-            correction_service = CorrectionService(model_type)
-            correction_result = correction_service.correct_assignment_with_validation(
-                key_criteria=key_criteria,
-                assignment_content=assignment,
-                required_exercises=required_exercises,
-                language=language
-            )
-            corrections.append({
-                "student_file": student_files[idx].filename,
-                "result": correction_result
-            })
-
-        # Detección de similitudes entre archivos
-        similarity_results = []
-        for i in range(len(assignments)):
-            for j in range(i + 1, len(assignments)):
-                similarity = Analysis.detect_similarity(assignments[i], assignments[j])
-                similarity_results.append({
-                    "file1": student_files[i].filename,
-                    "file2": student_files[j].filename,
-                    "similarity_percentage": round(similarity, 2)
-                })
-
-        # Construir respuesta
-        response = {
-            "corrections": corrections,
-            "similarities": similarity_results
-        }
-
-        return jsonify(response)
-
+        _check_service()
+        
+        # Verificar que se haya subido un archivo
+        if 'file' not in request.files:
+            return jsonify({'error': 'No se ha proporcionado archivo'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No se ha seleccionado archivo'}), 400
+        
+        # Obtener datos del formulario
+        title = request.form.get('title', '').strip()
+        description = request.form.get('description', '').strip()
+        
+        if not title:
+            return jsonify({'error': 'El título es requerido'}), 400
+        
+        # Obtener ID del usuario actual
+        current_user = request.current_user
+        teacher_id = str(current_user['id'])
+        
+        logger.info(f"Subiendo asignación: {title} para usuario {teacher_id}")
+        
+        # Crear asignación
+        result = assignment_service.create_assignment_from_file(
+            file=file,
+            title=title,
+            description=description,
+            teacher_id=teacher_id
+        )
+        
+        return jsonify({
+            'message': 'Asignación creada exitosamente',
+            'data': result
+        }), 201
+        
     except Exception as e:
-        logging.error(f"Error en el proceso de corrección: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"Error subiendo asignación: {str(e)}")
+        return jsonify({'error': 'Error interno del servidor'}), 500
 
-    finally:
-        # Limpiar archivos temporales
-        if key_path:
-            FileHandler.clean_temporary_files([key_path])
-        FileHandler.clean_temporary_files(student_paths)
+@assignment_bp.route('', methods=['GET'])
+@assignment_bp.route('/', methods=['GET'])
+@cross_origin(supports_credentials=True)
+@jwt_required
+@require_roles([UserRole.TEACHER, UserRole.COORDINATOR, UserRole.ADMIN])
+def get_assignments():
+    """Obtiene todas las asignaciones del profesor"""
+    try:
+        _check_service()
+        
+        current_user = request.current_user
+        teacher_id = str(current_user['id'])
+        
+        assignments = assignment_service.get_teacher_assignments(teacher_id)
+        
+        return jsonify({
+            'message': 'Asignaciones obtenidas exitosamente',
+            'data': assignments
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo asignaciones: {str(e)}")
+        return jsonify({'error': 'Error interno del servidor'}), 500
+
+@assignment_bp.route('/<assignment_id>', methods=['GET'])
+@cross_origin(supports_credentials=True)
+@jwt_required
+@require_roles([UserRole.TEACHER, UserRole.COORDINATOR, UserRole.ADMIN])
+def get_assignment(assignment_id):
+    """Obtiene una asignación específica"""
+    try:
+        _check_service()
+        
+        current_user = request.current_user
+        teacher_id = str(current_user['id'])
+        
+        assignment = assignment_service.get_assignment(assignment_id, teacher_id)
+        
+        if not assignment:
+            return jsonify({'error': 'Asignación no encontrada'}), 404
+        
+        return jsonify({
+            'message': 'Asignación obtenida exitosamente',
+            'data': assignment
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo asignación: {str(e)}")
+        return jsonify({'error': 'Error interno del servidor'}), 500
+
+@assignment_bp.route('/<assignment_id>/solutions', methods=['PUT'])
+@cross_origin(supports_credentials=True)
+@jwt_required
+@require_roles([UserRole.TEACHER, UserRole.COORDINATOR, UserRole.ADMIN])
+def update_solutions(assignment_id):
+    """Actualiza las soluciones de una asignación"""
+    try:
+        _check_service()
+        
+        data = request.get_json()
+        
+        if not data or 'solutions' not in data:
+            return jsonify({'error': 'Se requieren las soluciones'}), 400
+        
+        current_user = request.current_user
+        teacher_id = str(current_user['id'])
+        
+        result = assignment_service.update_solutions(assignment_id, data['solutions'], teacher_id)
+        
+        return jsonify({
+            'message': 'Soluciones actualizadas exitosamente',
+            'data': result
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error actualizando soluciones: {str(e)}")
+        return jsonify({'error': 'Error interno del servidor'}), 500
+
+@assignment_bp.route('/<assignment_id>/rubric', methods=['PUT'])
+@cross_origin(supports_credentials=True)
+@jwt_required
+@require_roles([UserRole.TEACHER, UserRole.COORDINATOR, UserRole.ADMIN])
+def update_rubric(assignment_id):
+    """Actualiza la rúbrica de una asignación"""
+    try:
+        _check_service()
+        
+        data = request.get_json()
+        
+        if not data or 'rubric' not in data:
+            return jsonify({'error': 'Se requiere la rúbrica'}), 400
+        
+        current_user = request.current_user
+        teacher_id = str(current_user['id'])
+        
+        result = assignment_service.update_rubric(assignment_id, data['rubric'], teacher_id)
+        
+        return jsonify({
+            'message': 'Rúbrica actualizada exitosamente',
+            'data': result
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error actualizando rúbrica: {str(e)}")
+        return jsonify({'error': 'Error interno del servidor'}), 500
+
+@assignment_bp.route('/<assignment_id>/finalize', methods=['POST'])
+@cross_origin(supports_credentials=True)
+@jwt_required
+@require_roles([UserRole.TEACHER, UserRole.COORDINATOR, UserRole.ADMIN])
+def finalize_assignment(assignment_id):
+    """Finaliza una asignación (marca como lista para usar)"""
+    try:
+        _check_service()
+        
+        current_user = request.current_user
+        teacher_id = str(current_user['id'])
+        
+        result = assignment_service.finalize_assignment(assignment_id, teacher_id)
+        
+        return jsonify({
+            'message': 'Asignación finalizada exitosamente',
+            'data': result
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error finalizando asignación: {str(e)}")
+        return jsonify({'error': 'Error interno del servidor'}), 500
+
+@assignment_bp.route('/check-stuck', methods=['POST'])
+@cross_origin(supports_credentials=True)
+@jwt_required
+@require_roles([UserRole.ADMIN])
+def check_stuck_assignments():
+    """Verifica y marca como error las asignaciones bloqueadas"""
+    try:
+        count = assignment_service.check_stuck_assignments()
+        return jsonify({
+            'message': f'Verificación completada',
+            'stuck_assignments_fixed': count
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error verificando asignaciones bloqueadas: {str(e)}")
+        return jsonify({'error': 'Error interno del servidor'}), 500
+
+@assignment_bp.route('/<assignment_id>/delete', methods=['DELETE'])
+@cross_origin(supports_credentials=True)
+@jwt_required
+@require_roles([UserRole.TEACHER, UserRole.COORDINATOR, UserRole.ADMIN])
+def delete_assignment(assignment_id: str):
+    """Elimina una asignación"""
+    try:
+        current_user = request.current_user
+        teacher_id = str(current_user['id'])
+        
+        result = assignment_service.delete_assignment(assignment_id, teacher_id)
+        
+        if 'error' in result:
+            return jsonify(result), 404
+            
+        return jsonify(result), 200
+        
+    except Exception as e:
+        logger.error(f"Error eliminando asignación {assignment_id}: {str(e)}")
+        return jsonify({'error': 'Error interno del servidor'}), 500
+
+@assignment_bp.route('/<assignment_id>/download-rubric', methods=['GET'])
+@cross_origin(supports_credentials=True)
+@jwt_required
+@require_roles([UserRole.TEACHER, UserRole.COORDINATOR, UserRole.ADMIN])
+def download_rubric(assignment_id: str):
+    """Descarga la rúbrica en formato PDF"""
+    try:
+        current_user = request.current_user
+        teacher_id = str(current_user['id'])
+        
+        pdf_data = assignment_service.generate_rubric_pdf(assignment_id, teacher_id)
+        
+        if 'error' in pdf_data:
+            return jsonify(pdf_data), 404
+            
+        return Response(
+            pdf_data['pdf_content'],
+            mimetype='application/pdf',
+            headers={
+                'Content-Disposition': f'attachment; filename="{pdf_data["filename"]}"'
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error generando PDF de rúbrica {assignment_id}: {str(e)}")
+        return jsonify({'error': 'Error interno del servidor'}), 500
+
+@assignment_bp.route('/<assignment_id>/download-solutions', methods=['GET'])
+@cross_origin(supports_credentials=True)
+@jwt_required
+@require_roles([UserRole.TEACHER, UserRole.COORDINATOR, UserRole.ADMIN])
+def download_solutions(assignment_id: str):
+    """Descarga las soluciones en formato PDF"""
+    try:
+        current_user = request.current_user
+        teacher_id = str(current_user['id'])
+        
+        pdf_data = assignment_service.generate_solutions_pdf(assignment_id, teacher_id)
+        
+        if 'error' in pdf_data:
+            return jsonify(pdf_data), 404
+            
+        return Response(
+            pdf_data['pdf_content'],
+            mimetype='application/pdf',
+            headers={
+                'Content-Disposition': f'attachment; filename="{pdf_data["filename"]}"'
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error generando PDF de soluciones {assignment_id}: {str(e)}")
+        return jsonify({'error': 'Error interno del servidor'}), 500

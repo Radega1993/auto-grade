@@ -1,0 +1,159 @@
+version: '3.8'
+
+services:
+  # Base de datos PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: autograder_postgres
+    environment:
+      POSTGRES_DB: autograder
+      POSTGRES_USER: autograder_user
+      POSTGRES_PASSWORD: autograder_password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    networks:
+      - autograder_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U autograder_user -d autograder"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis para cache y sesiones
+  redis:
+    image: redis:7-alpine
+    container_name: autograder_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - autograder_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend Flask
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: autograder_backend
+    environment:
+      # Base de datos
+      DATABASE_URL: postgresql://autograder_user:autograder_password@postgres:5432/autograder
+      
+      # Redis
+      REDIS_URL: redis://redis:6379/0
+      
+      # Flask
+      FLASK_APP: src/main.py
+      FLASK_ENV: production
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
+      
+      # Ollama
+      OLLAMA_HOST: ollama
+      OLLAMA_PORT: 11434
+      OLLAMA_MODEL: llama3.2
+      
+      # OpenAI (opcional)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: gpt-4
+      
+      # JWT
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-your-jwt-secret-key-change-in-production}
+      JWT_ACCESS_TOKEN_EXPIRES: 3600
+      
+      # Uploads
+      MAX_CONTENT_LENGTH: 16777216  # 16MB
+      UPLOAD_FOLDER: /app/uploads
+      TEMP_FOLDER: /app/temp
+    volumes:
+      - ../backend/uploads:/app/uploads
+      - ../backend/temp:/app/temp
+      - ../backend/logs:/app/logs
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - autograder_network
+    restart: unless-stopped
+
+  # Ollama para IA local
+  ollama:
+    image: ollama/ollama:latest
+    container_name: autograder_ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    networks:
+      - autograder_network
+    restart: unless-stopped
+    # Comando para descargar el modelo al iniciar
+    command: >
+      sh -c "ollama serve & 
+             sleep 10 && 
+             ollama pull llama3.2 && 
+             wait"
+
+  # Frontend React
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: autograder_frontend
+    environment:
+      VITE_API_URL: http://localhost:5000/api
+      VITE_APP_NAME: AutoGrader
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - autograder_network
+    restart: unless-stopped
+
+  # Nginx como reverse proxy (opcional para producción)
+  nginx:
+    image: nginx:alpine
+    container_name: autograder_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - autograder_network
+    restart: unless-stopped
+    profiles:
+      - production
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  ollama_data:
+    driver: local
+
+networks:
+  autograder_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

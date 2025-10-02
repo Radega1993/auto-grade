@@ -1,0 +1,122 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# AutoGrade
+
+Estamos desarrollando una plataforma SaaS privada para docentes, que permite subir y corregir automáticamente las tareas de sus alumnos mediante Inteligencia Artificial (IA). Los alumnos no tienen acceso directo a la plataforma; todo lo gestiona el docente.
+
+La plataforma permite que los profesores suban una o varias tareas, indiquen los criterios de evaluación (rúbricas), y reciban automáticamente correcciones, calificaciones y comentarios generados por IA, listos para ser descargados o compartidos.
+Estructura de la aplicación
+
+## La aplicación estará dividida en las siguientes secciones o módulos:
+
+    Inicio / Dashboard
+
+    Subida de tareas
+
+        Tarea modelo
+
+        Tareas de alumnos
+
+    Corrección automática
+
+        Visualización de resultados
+
+        Exportación de informes
+
+    Historial de correcciones
+
+    Gestión de rúbricas
+
+    Panel de usuario y suscripción
+
+    Configuración y soporte
+
+## Sistema de roles
+
+Nuestra plataforma solo está pensada para docentes y gestores educativos, pero se contemplan distintos roles:
+
+    Docente: puede crear tareas, subir entregas y obtener correcciones.
+
+    Coordinador: gestiona docentes dentro de una institución.
+
+    Administrador (SaaS): gestiona cuentas, suscripciones, IA, y configuraciones generales.
+
+## Características especiales
+
+    Corrección de textos utilizando modelos de lenguaje (LLM).
+
+    Soporte para múltiples formatos: PDF, DOCX, TXT, imágenes escaneadas.
+
+    Personalización de criterios de evaluación (rúbricas editables).
+
+    Generación de informes detallados por alumno.
+
+    Panel de estadísticas de clase.
+
+    Soporte multilingüe (castellano, catalán, inglés).
+
+    Correcciones almacenadas de forma privada, accesibles solo por el docente.
+
+    Opcional: funcionamiento offline con modelo local de IA (versión descargable).
+
+## Tecnologías
+
+Estas son las tecnologías que vamos a utilizar:
+Frontend
+
+    ReactJS con TypeScript
+
+    TailwindCSS para diseño
+
+    Recharts / Chart.js para estadísticas visuales
+
+##Backend
+
+    Python (FastAPI) para el motor de IA y procesamiento de texto
+
+    PostgreSQL como base de datos principal
+
+    Supabase Storage para almacenamiento de archivos
+
+Inteligencia Artificial
+
+    Ollama con modelos como Mistral o LLaMA 2 para funcionamiento offline
+
+    Deepseak para correcciones online avanzadas
+
+    LangChain + spaCy para análisis y orquestación
+
+    pydantic para la creación de agentes
+
+    Pinecone para búsquedas semánticas y embeddings
+
+Autenticación y seguridad
+
+    JWT + Passport (NestJS) para sesiones seguras
+
+    Cifrado AES para archivos
+
+    Sistema de roles y permisos
+
+DevOps
+
+    Docker para contenedores
+
+    Render / Railway / Vercel para despliegue
+
+    GitHub Actions para CI/CD
+
+Testing
+
+Todo el sistema debe contar con una cobertura adecuada de tests, incluyendo:
+
+    Unit tests para componentes de React y lógica de NestJS y FastAPI.
+
+    Tests de integración para interacciones backend/IA.
+
+    Tests end-to-end (E2E) con Playwright o Cypress.
+
+    Casos específicos de prueba IA: validación manual de prompts, escenarios adversos.
